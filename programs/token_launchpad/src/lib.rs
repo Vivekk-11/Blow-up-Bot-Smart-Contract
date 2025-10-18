@@ -1,7 +1,7 @@
 mod state;
 use state::config::*;
 
-use anchor_lang::prelude::{*,  program::invoke};
+use anchor_lang::{solana_program::{system_instruction::transfer, program::{invoke, invoke_signed}}, prelude::*};
 use anchor_spl::token::{self, Mint, Token, TokenAccount, MintTo};
 use anchor_spl::metadata::{CreateMetadataAccountsV3, create_metadata_accounts_v3, mpl_token_metadata::{self, types::DataV2}};
 
@@ -90,7 +90,7 @@ pub mod token_launchpad {
 
         let cfg = &mut ctx.accounts.global_config;
 
-        let create_fee_ix = anchor_lang::solana_program::system_instruction::transfer(
+        let create_fee_ix = transfer(
             &ctx.accounts.creator.key(),
             &cfg.treasury,
             cfg.creation_fee
@@ -110,23 +110,69 @@ pub mod token_launchpad {
     }
 
     pub fn buy_tokens(ctx: Context<BuyTokens>, sol_amount: u64) -> Result<()> {
-        let bonding_curve = &ctx.accounts.bonding_curve;
+        let bonding_curve = &mut ctx.accounts.bonding_curve;
+        let cfg = &mut ctx.accounts.global_config;
+        let buyer = &ctx.accounts.buyer;
+        let creator_key = bonding_curve.creator;
+        
+        let fee_bps = cfg.buy_fee_bps as u128;
+        let sol_amount_128 = sol_amount as u128;
+        let fee_128 = fee_bps
+        .checked_mul(sol_amount_128)
+        .ok_or(ErrorCode::InvalidProgramExecutable)?
+        .checked_div(10_000u128)
+        .ok_or(ErrorCode::InvalidProgramExecutable)?;
+        
+        let fee = fee_128 as u64;
+        let effective_sol = sol_amount
+            .checked_sub(fee)
+            .ok_or(ErrorCode::InvalidProgramExecutable)?;
+        
         let initial_sol_reserves = bonding_curve.virtual_sol_reserves;
         let initial_token_reserves = bonding_curve.virtual_token_reserves;
-        let tokens_out = calculate_tokens_out(sol_amount, initial_sol_reserves, initial_token_reserves);
-        let buyer = &ctx.accounts.buyer;
-
-        let transaction_ix = anchor_lang::solana_program::system_instruction::transfer(
+        let tokens_out = calculate_tokens_out(effective_sol, initial_sol_reserves, initial_token_reserves);
+        
+        let transaction_ix = transfer(
             &buyer.key(),
             &bonding_curve.key(),
             sol_amount.clone()
         );
-
+        
         invoke(&transaction_ix, &[
             buyer.to_account_info(),
             bonding_curve.to_account_info(),
             ctx.accounts.system_program.to_account_info()
         ])?;
+
+
+        let seeds: &[&[u8]] = &[b"bonding-curve", creator_key.as_ref(), &[bonding_curve.bump]];
+        let signer_seeds = &[seeds];
+        
+        if fee > 0 {
+            let transaction_fee_ix = transfer(&bonding_curve.key(), &cfg.treasury, fee);
+            invoke_signed(&transaction_fee_ix, &[
+                bonding_curve.to_account_info(),
+                ctx.accounts.system_program.to_account_info()
+            ], signer_seeds)?;
+        }
+
+        let transfer_token_accounts= token::Transfer {
+            from: ctx.accounts.bonding_curve_token_account.to_account_info(),
+            to: ctx.accounts.buyer_token_account.to_account_info(),
+            authority: bonding_curve.to_account_info()
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            transfer_token_accounts, 
+            signer_seeds
+        );
+
+        bonding_curve.real_sol_reserves = bonding_curve.real_sol_reserves.checked_add(effective_sol).ok_or(ErrorCode::InvalidNumericConversion)?;
+        bonding_curve.real_token_reserves = bonding_curve.real_token_reserves.checked_sub(tokens_out).ok_or(ErrorCode::InvalidNumericConversion)?;
+        cfg.total_volume_sol = cfg.total_volume_sol.checked_add(effective_sol as u128).ok_or(ErrorCode::InvalidNumericConversion)?;
+
+        token::transfer(cpi_ctx, tokens_out)?;
 
         Ok(())
     }
@@ -178,7 +224,6 @@ pub struct CreateToken<'info> {
     pub rent: Sysvar<'info, Rent>
 }
 
-
 #[derive(Accounts)]
 pub struct BuyTokens<'info> {
     #[account(mut)]
@@ -197,6 +242,9 @@ pub struct BuyTokens<'info> {
         bump = bonding_curve.bump
     )]
     pub bonding_curve: Account<'info, BondingCurve>,
+
+    #[account(mut)]
+    pub bonding_curve_token_account: Account<'info, TokenAccount>,
 
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
