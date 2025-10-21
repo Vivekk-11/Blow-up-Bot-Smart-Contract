@@ -1,8 +1,8 @@
 mod state;
 use state::config::*;
 
-use anchor_lang::{solana_program::{system_instruction::transfer, program::{invoke, invoke_signed}}, prelude::*};
-use anchor_spl::token::{self, Mint, Token, TokenAccount, MintTo};
+use anchor_lang::{prelude::{program_pack::Pack, *}, solana_program::{program::{invoke, invoke_signed}, system_instruction::transfer}};
+use anchor_spl::{associated_token::spl_associated_token_account::{self}, token::{self, spl_token::{self}, Mint, MintTo, Token, TokenAccount}};
 use anchor_spl::metadata::{CreateMetadataAccountsV3, create_metadata_accounts_v3, mpl_token_metadata::{self, types::DataV2}};
 
 declare_id!("11111111111111111111111111111111");
@@ -21,11 +21,12 @@ pub struct BondingCurve {
 
 #[program]
 pub mod token_launchpad {
-
+    
     use super::*;
-
+    
     pub fn create_token(ctx: Context<CreateToken>, name: String, symbol: String, uri: String) -> Result<()> {
         let bonding_curve = &mut ctx.accounts.bonding_curve;
+        let cfg = &mut ctx.accounts.global_config;
 
         bonding_curve.creator = ctx.accounts.creator.key();
         bonding_curve.token_mint = ctx.accounts.token_mint.key();
@@ -35,7 +36,7 @@ pub mod token_launchpad {
         bonding_curve.real_token_reserves = REAL_TOKEN_RESERVES;
         bonding_curve.graduated = false;
         bonding_curve.bump = ctx.bumps.bonding_curve;
-        
+
         let seeds: &[&[u8]] = &[
         b"bonding-curve",
         ctx.accounts.creator.key.as_ref(),
@@ -88,8 +89,6 @@ pub mod token_launchpad {
 
         create_metadata_accounts_v3(metadata_ctx, data, false, false, None)?;
 
-        let cfg = &mut ctx.accounts.global_config;
-
         let create_fee_ix = transfer(
             &ctx.accounts.creator.key(),
             &cfg.treasury,
@@ -111,84 +110,93 @@ pub mod token_launchpad {
     }
 
     pub fn buy_tokens(ctx: Context<BuyTokens>, sol_amount: u64) -> Result<()> {
-        let bonding_curve = &mut ctx.accounts.bonding_curve;
-        let cfg = &mut ctx.accounts.global_config;
-        let buyer = &ctx.accounts.buyer;
-        let creator_key = bonding_curve.creator;
+        require!(!ctx.accounts.bonding_curve.graduated, ErrorCode::InvalidProgramExecutable);
         
-        let fee_bps = cfg.buy_fee_bps as u128;
-        let sol_amount_128 = sol_amount as u128;
-        let fee_128 = fee_bps
-        .checked_mul(sol_amount_128)
-        .ok_or(ErrorCode::InvalidProgramExecutable)?
-        .checked_div(10_000u128)
-        .ok_or(ErrorCode::InvalidProgramExecutable)?;
-        
-        let fee = fee_128 as u64;
-        let effective_sol = sol_amount
-            .checked_sub(fee)
-            .ok_or(ErrorCode::InvalidProgramExecutable)?;
-        
-        let initial_sol_reserves = bonding_curve.virtual_sol_reserves;
-        let initial_token_reserves = bonding_curve.virtual_token_reserves;
-        let tokens_out = calculate_tokens_out(effective_sol, initial_sol_reserves, initial_token_reserves);
-        
-        let transaction_ix = transfer(
-            &buyer.key(),
-            &bonding_curve.key(),
-            sol_amount.clone()
-        );
-        
-        invoke(&transaction_ix, &[
-            buyer.to_account_info(),
-            bonding_curve.to_account_info(),
-            ctx.accounts.system_program.to_account_info()
-        ])?;
+        {
+            let cfg = &mut ctx.accounts.global_config;
+            let bonding_curve = &mut ctx.accounts.bonding_curve;
+            let buyer = &ctx.accounts.buyer;
+            let creator_key = bonding_curve.creator;
 
-
-        let seeds: &[&[u8]] = &[b"bonding-curve", creator_key.as_ref(), &[bonding_curve.bump]];
-        let signer_seeds = &[seeds];
+            let fee_bps = cfg.buy_fee_bps as u128;
+            let sol_amount_128 = sol_amount as u128;
+            let fee_128 = fee_bps
+                .checked_mul(sol_amount_128)
+                .ok_or(ErrorCode::InvalidProgramExecutable)?
+                .checked_div(10_000u128)
+                .ok_or(ErrorCode::InvalidProgramExecutable)?;
         
-        if fee > 0 {
-            let transaction_fee_ix = transfer(&bonding_curve.key(), &ctx.accounts.treasury.key(), fee);
-            invoke_signed(&transaction_fee_ix, &[
+            let fee = fee_128 as u64;
+            let effective_sol = sol_amount
+               .checked_sub(fee)
+               .ok_or(ErrorCode::InvalidProgramExecutable)?;
+
+            let initial_sol_reserves = bonding_curve.virtual_sol_reserves;
+            let initial_token_reserves = bonding_curve.virtual_token_reserves;
+            let tokens_out = calculate_tokens_out(effective_sol, initial_sol_reserves, initial_token_reserves);
+            
+            let transaction_ix = transfer(
+                &buyer.key(),
+                &bonding_curve.key(),
+                sol_amount.clone()
+            );
+            
+            invoke(&transaction_ix, &[
+                buyer.to_account_info(),
                 bonding_curve.to_account_info(),
-                ctx.accounts.treasury.to_account_info(),
                 ctx.accounts.system_program.to_account_info()
-            ], signer_seeds)?;
-        }
-
-        let transfer_token_accounts= token::Transfer {
-            from: ctx.accounts.bonding_curve_token_account.to_account_info(),
-            to: ctx.accounts.buyer_token_account.to_account_info(),
-            authority: bonding_curve.to_account_info()
-        };
-
-        let cpi_ctx = CpiContext::new_with_signer(
+            ])?;
+            
+            let seeds: &[&[u8]] = &[b"bonding-curve", creator_key.as_ref(), &[bonding_curve.bump]];
+            let signer_seeds = &[seeds];
+            
+            if fee > 0 {
+                let transaction_fee_ix = transfer(&bonding_curve.key(), &ctx.accounts.treasury.key(), fee);
+                invoke_signed(&transaction_fee_ix, &[
+                    bonding_curve.to_account_info(),
+                    ctx.accounts.treasury.to_account_info(),
+                    ctx.accounts.system_program.to_account_info()
+                ], signer_seeds)?;
+            }
+            
+            let transfer_token_accounts= token::Transfer {
+                from: ctx.accounts.bonding_curve_token_account.to_account_info(),
+                to: ctx.accounts.buyer_token_account.to_account_info(),
+                authority: bonding_curve.to_account_info()
+            };
+            
+            let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
             transfer_token_accounts, 
             signer_seeds
-        );
+            );
+            
+            bonding_curve.real_sol_reserves = bonding_curve.real_sol_reserves.checked_add(effective_sol).ok_or(ErrorCode::InvalidNumericConversion)?;
+            bonding_curve.real_token_reserves = bonding_curve.real_token_reserves.checked_sub(tokens_out).ok_or(ErrorCode::InvalidNumericConversion)?;
+            cfg.total_volume_sol = cfg.total_volume_sol.checked_add(effective_sol as u128).ok_or(ErrorCode::InvalidNumericConversion)?;
+            
+            token::transfer(cpi_ctx, tokens_out)?;
 
-        bonding_curve.real_sol_reserves = bonding_curve.real_sol_reserves.checked_add(effective_sol).ok_or(ErrorCode::InvalidNumericConversion)?;
-        bonding_curve.real_token_reserves = bonding_curve.real_token_reserves.checked_sub(tokens_out).ok_or(ErrorCode::InvalidNumericConversion)?;
-        cfg.total_volume_sol = cfg.total_volume_sol.checked_add(effective_sol as u128).ok_or(ErrorCode::InvalidNumericConversion)?;
-
-        token::transfer(cpi_ctx, tokens_out)?;
-
+        }
+        
+        if ctx.accounts.bonding_curve.real_sol_reserves >= ctx.accounts.global_config.graduation_threshold {
+            graduate(ctx)?;
+        }
+        
         Ok(())
-    }
 
+    }
+    
     pub fn sell_tokens(ctx: Context<SellTokens>, tokens_in: u64) -> Result<()> {
         let bonding_curve = &mut ctx.accounts.bonding_curve;
         let global_config = &mut ctx.accounts.global_config;
         let seller = &ctx.accounts.seller;
         let creator_key = bonding_curve.creator;
-        let seeds : &[&[u8]]= &[b"bonding-curve", creator_key.as_ref(), &[bonding_curve.bump]];
+        let seeds: &[&[u8]] = &[b"bonding-curve", creator_key.as_ref(), &[bonding_curve.bump]];
         let signer_seeds = &[seeds];
-
+        
         require_gt!(tokens_in, 0, ErrorCode::InvalidProgramExecutable);
-
+        
         let initial_sol_reserves = bonding_curve.virtual_sol_reserves;
         let initial_token_reserves = bonding_curve.virtual_token_reserves;
         let sol_out  = calculate_sol_out(tokens_in, initial_sol_reserves, initial_token_reserves);
@@ -306,6 +314,9 @@ pub struct BuyTokens<'info> {
     #[account(mut)]
     pub buyer: Signer<'info>,
 
+    #[account(mut)]
+    pub creator_token_account: Signer<'info>,
+
     #[account(
         mut,
         seeds = [b"global-config"],
@@ -333,10 +344,24 @@ pub struct BuyTokens<'info> {
     pub token_mint: Account<'info, Mint>,
 
     #[account(mut)]
+    pub metadata_account: UncheckedAccount<'info>,
+    
+    #[account(mut)]
     pub buyer_token_account: Account<'info, TokenAccount>,
+    
+    #[account(mut)]
+    pub wsol_temp_token_account: UncheckedAccount<'info>,
 
+    #[account(mut)]
+    pub liquidity_token_account: UncheckedAccount<'info>,
+    
+    pub wsol_mint_account: Account<'info, Mint>,
+    
+    pub associated_token_program: UncheckedAccount<'info>,
+    pub token_metadata_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>
+    pub token_program: Program<'info, Token>,
+    pub rent: Sysvar<'info, Rent>
 }
 
 #[derive(Accounts)]
@@ -375,6 +400,13 @@ pub struct SellTokens<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[event]
+pub struct Graduated {
+    bonding_curve: Pubkey,
+    mint: Pubkey,
+    ata: Pubkey,
+    timestamp: i64,
+}
 
 pub fn calculate_tokens_out(
     sol_amount: u64,
@@ -454,4 +486,181 @@ pub struct InitializeGlobalConfig<'info> {
     pub global_config: Account<'info, GlobalConfig>,
 
     pub system_program: Program<'info, System>,
+}
+
+pub fn graduate(ctx: Context<BuyTokens>) -> Result<()> {
+
+    require!(!ctx.accounts.bonding_curve.graduated, ErrorCode::InvalidProgramExecutable);
+
+    let bonding_curve = &mut ctx.accounts.bonding_curve;
+    let creator_key = bonding_curve.creator;
+    let wsol_temp_account = &ctx.accounts.wsol_temp_token_account;
+    let wsol_mint_account = &ctx.accounts.wsol_mint_account;
+    let rent = Rent::get()?;
+    let ata_rent = rent.minimum_balance(spl_token::state::Account::LEN);
+    let mint_key = ctx.accounts.token_mint.key();
+    let seeds = &[b"metadata", mpl_token_metadata::programs::MPL_TOKEN_METADATA_ID.as_ref(), mint_key.as_ref()];
+    let (metadata_pda, _bump) = Pubkey::find_program_address(
+        seeds, 
+        &mpl_token_metadata::programs::MPL_TOKEN_METADATA_ID
+    );
+    require_keys_eq!(metadata_pda, ctx.accounts.metadata_account.key(), ErrorCode::InvalidProgramExecutable);
+    
+    let seeds: &[&[u8]] = &[b"bonding-curve", creator_key.as_ref(), &[bonding_curve.bump]];
+    let signer_seeds = &[seeds];
+    
+    let wsol_ata = spl_associated_token_account::get_associated_token_address(
+        &bonding_curve.key(),
+        &wsol_mint_account.key()
+    );
+    
+    if wsol_temp_account.key() != wsol_ata {
+        return err!(ErrorCode::InvalidProgramExecutable);
+    }
+    
+    let wsol_temp_info = wsol_temp_account.to_account_info();
+    
+    if wsol_temp_info.data_is_empty() {
+        
+        require!(bonding_curve.to_account_info().lamports() >= ata_rent, ErrorCode::InvalidProgramExecutable);
+
+        let create_wsol_ix = spl_associated_token_account::instruction::create_associated_token_account(
+            &bonding_curve.key(),
+            &bonding_curve.key(),
+            &wsol_mint_account.key(),
+            &spl_token::id()
+        ); 
+
+        invoke_signed(&create_wsol_ix, &[
+            bonding_curve.to_account_info(),
+            wsol_temp_account.to_account_info(),
+            bonding_curve.to_account_info(),
+            wsol_mint_account.to_account_info(),
+            ctx.accounts.system_program.to_account_info(),
+            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.rent.to_account_info(),
+            ctx.accounts.associated_token_program.to_account_info()
+            ], 
+        signer_seeds)?;
+
+        bonding_curve.real_sol_reserves = bonding_curve.real_sol_reserves
+                .checked_sub(ata_rent)
+                .unwrap_or(0);
+
+        } else {
+            require_keys_eq!(*wsol_temp_info.owner, spl_token::id(), ErrorCode::InvalidProgramExecutable);
+            
+            let ata_data = spl_token::state::Account::unpack(&wsol_temp_info.data.borrow())?;
+            
+            require_keys_eq!(ata_data.owner, bonding_curve.key(), ErrorCode::InvalidProgramExecutable);
+            require_keys_eq!(ata_data.mint, wsol_mint_account.key(), ErrorCode::InvalidProgramExecutable);
+        }
+
+        let liquidity_ata_info = ctx.accounts.liquidity_token_account.to_account_info();
+        let expected_liq_ata = spl_associated_token_account::get_associated_token_address(
+            &bonding_curve.key(), 
+            &ctx.accounts.token_mint.key()
+        );
+
+        require_keys_eq!(liquidity_ata_info.key(), expected_liq_ata, ErrorCode::InvalidProgramExecutable);
+
+        if liquidity_ata_info.data_is_empty() {
+            require!(bonding_curve.to_account_info().lamports() >= ata_rent, ErrorCode::InvalidProgramExecutable);
+
+            let create_liquidity_ata_ix = spl_associated_token_account::instruction::create_associated_token_account(
+                &bonding_curve.key(), 
+                &bonding_curve.key(), 
+                &ctx.accounts.token_mint.key(), 
+                &spl_token::id()
+            );
+
+            invoke_signed(&create_liquidity_ata_ix, 
+                &[
+                    bonding_curve.to_account_info(),
+                    liquidity_ata_info.clone(),
+                    bonding_curve.to_account_info(),
+                    ctx.accounts.token_mint.to_account_info(),
+                    ctx.accounts.system_program.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                    ctx.accounts.rent.to_account_info(),
+                    ctx.accounts.associated_token_program.to_account_info(),
+                ],
+            signer_seeds)?;
+
+            bonding_curve.real_sol_reserves = bonding_curve.real_sol_reserves.checked_sub(ata_rent).unwrap_or(0);
+        }
+
+        let liq_ata_data = spl_token::state::Account::unpack(&liquidity_ata_info.data.borrow())?;
+        require_keys_eq!(liq_ata_data.mint, ctx.accounts.token_mint.key(), ErrorCode::InvalidProgramExecutable);
+        require_keys_eq!(liq_ata_data.owner, bonding_curve.key(), ErrorCode::InvalidProgramExecutable);
+
+        let token_amount = bonding_curve.real_token_reserves;
+        if token_amount > 0 {
+            let transfer_accounts = token::Transfer {
+                from: ctx.accounts.bonding_curve_token_account.to_account_info(),
+                to: ctx.accounts.liquidity_token_account.to_account_info(),
+                authority: bonding_curve.to_account_info()
+            };   
+
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(), 
+                transfer_accounts, 
+                signer_seeds
+            );
+            
+            token::transfer(cpi_ctx, token_amount)?;
+            
+            bonding_curve.real_token_reserves = bonding_curve.real_token_reserves
+              .checked_sub(token_amount)
+              .unwrap_or(0);
+        }
+
+        let total_to_wrap = bonding_curve.real_sol_reserves;
+        if total_to_wrap  > 0 {
+            let bonding_curve_size = bonding_curve.to_account_info().data_len();
+            let minimum_balance_to_keep = rent.minimum_balance(bonding_curve_size);
+            let pda_lamports = bonding_curve.to_account_info().lamports();
+            let max_transferable_from_pda = pda_lamports.saturating_sub(minimum_balance_to_keep);
+            let amount_to_wrap = core::cmp::min(total_to_wrap, max_transferable_from_pda);
+
+            if amount_to_wrap > 0 {
+                let transfer_ix = system_instruction::transfer(
+                    &bonding_curve.key(),
+                    &wsol_ata,
+                    amount_to_wrap
+                );
+                invoke_signed(&transfer_ix, &[
+                    bonding_curve.to_account_info(),
+                    wsol_temp_account.to_account_info(),
+                    ctx.accounts.system_program.to_account_info()
+                ], signer_seeds)?;
+                    
+                let sync_ix = spl_token::instruction::sync_native(
+                    &spl_token::id(),
+                    &wsol_ata
+                )?;
+                invoke_signed(&sync_ix, &[
+                    wsol_temp_account.to_account_info(),
+                    ctx.accounts.token_program.to_account_info()
+                ], signer_seeds)?;
+
+                bonding_curve.real_sol_reserves = bonding_curve.real_sol_reserves
+                .checked_sub(amount_to_wrap)
+                .unwrap_or(0);
+            }
+        }
+
+        bonding_curve.graduated = true;
+
+        let clock = Clock::get()?;
+        emit!(
+            Graduated {
+                bonding_curve: bonding_curve.key(),
+                mint: ctx.accounts.token_mint.key(),
+                ata: wsol_ata,
+                timestamp: clock.unix_timestamp
+            }
+        );
+        
+    Ok(())
 }
