@@ -10,7 +10,7 @@ pub const TOKEN_TOTAL_SUPPLY: u64 = 1_000_000_000_000_000;
 pub const DEFAULT_BUY_FEE_BPS: u16 = 100;
 pub const DEFAULT_SELL_FEE_BPS: u16 = 100;
 pub const DEFAULT_CREATION_FEE: u64 = 20_000_000;
-pub const DEFAULT_GRADUATION_THRESHOLD: u64 = 85_000_000_000; 
+pub const DEFAULT_GRADUATION_THRESHOLD: u64 = 85_000_000_000;
 
 pub const MAX_BUY_FEE_BPS: u16 = 1000;
 pub const MAX_SELL_FEE_BPS: u16 = 1000;
@@ -34,15 +34,5 @@ pub struct GlobalConfig {
 }
 
 impl GlobalConfig {
-    pub const LEN: usize = 8 +
-        32 + 
-        32 +
-        2 +
-        2 +  
-        8 +
-        8 +  
-        8 +  
-        16 +
-        1 +  
-        1;
+    pub const LEN: usize = 8 + 32 + 32 + 2 + 2 + 8 + 8 + 8 + 16 + 1 + 1;
 }
