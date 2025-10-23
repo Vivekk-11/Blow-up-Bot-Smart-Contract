@@ -33,3 +33,20 @@ pub struct GlobalConfig {
 impl GlobalConfig {
     pub const LEN: usize = 8 + 32 + 32 + 2 + 2 + 8 + 8 + 8 + 16 + 1 + 1;
 }
+
+#[derive(Accounts)]
+pub struct InitializeGlobalConfig<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+
+    #[account(
+        init,
+        payer = admin,
+        space = GlobalConfig::LEN,
+        seeds = [b"global-config"],
+        bump
+    )]
+    pub global_config: Account<'info, GlobalConfig>,
+
+    pub system_program: Program<'info, System>,
+}
