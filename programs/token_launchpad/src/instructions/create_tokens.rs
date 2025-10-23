@@ -15,9 +15,6 @@ use crate::{
 };
 
 pub fn handler(ctx: Context<CreateToken>, name: String, symbol: String, uri: String) -> Result<()> {
-    // TODO: create the mint account
-    // TODO: create the treasury
-
     let bonding_curve = &mut ctx.accounts.bonding_curve;
     let cfg = &mut ctx.accounts.global_config;
 
