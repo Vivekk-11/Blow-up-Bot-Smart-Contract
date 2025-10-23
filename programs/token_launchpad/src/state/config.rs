@@ -15,20 +15,17 @@ pub const DEFAULT_GRADUATION_THRESHOLD: u64 = 85_000_000_000;
 pub const MAX_BUY_FEE_BPS: u16 = 1000;
 pub const MAX_SELL_FEE_BPS: u16 = 1000;
 pub const MAX_CREATION_FEE: u64 = 100_000_000;
-
 #[account]
 pub struct GlobalConfig {
     pub authority: Pubkey,
     pub treasury: Pubkey,
-
     pub buy_fee_bps: u16,
     pub sell_fee_bps: u16,
     pub creation_fee: u64,
     pub graduation_threshold: u64,
-
     pub total_tokens_created: u64,
     pub total_volume_sol: u128,
-
+    pub allowed_relayer: Pubkey,
     pub paused: bool,
     pub bump: u8,
 }

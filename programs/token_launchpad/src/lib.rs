@@ -1,11 +1,11 @@
 mod state;
-use std::str::FromStr;
 
 use state::config::*;
 
 use anchor_lang::{
     prelude::{program_pack::Pack, *},
     solana_program::{
+        self,
         program::{invoke, invoke_signed},
         system_instruction::transfer,
     },
@@ -23,6 +23,8 @@ use anchor_spl::{
         Mint, MintTo, Token, TokenAccount,
     },
 };
+
+use crate::state::pool_request::{CreatePoolRequestEvent, PoolRequest};
 
 declare_id!("11111111111111111111111111111111");
 
@@ -50,6 +52,7 @@ pub mod token_launchpad {
         uri: String,
     ) -> Result<()> {
         // TODO: create the mint account
+        // TODO: create the treasury
 
         let bonding_curve = &mut ctx.accounts.bonding_curve;
         let cfg = &mut ctx.accounts.global_config;
@@ -145,7 +148,7 @@ pub mod token_launchpad {
         Ok(())
     }
 
-    pub fn buy_tokens(ctx: Context<BuyTokens>, sol_amount: u64) -> Result<()> {
+    pub fn buy_tokens(ctx: Context<BuyTokens>, sol_amount: u64, nonce: u64) -> Result<()> {
         require!(
             !ctx.accounts.bonding_curve.graduated,
             ErrorCode::InvalidProgramExecutable
@@ -173,7 +176,7 @@ pub mod token_launchpad {
             let initial_sol_reserves = bonding_curve.virtual_sol_reserves;
             let initial_token_reserves = bonding_curve.virtual_token_reserves;
             let tokens_out =
-                calculate_tokens_out(effective_sol, initial_sol_reserves, initial_token_reserves);
+                calculate_tokens_out(effective_sol, initial_sol_reserves, initial_token_reserves)?;
 
             let transaction_ix = transfer(&buyer.key(), &bonding_curve.key(), sol_amount.clone());
 
@@ -238,7 +241,7 @@ pub mod token_launchpad {
         if ctx.accounts.bonding_curve.real_sol_reserves
             >= ctx.accounts.global_config.graduation_threshold
         {
-            graduate(ctx)?;
+            graduate(ctx, nonce)?;
         }
 
         Ok(())
@@ -260,7 +263,7 @@ pub mod token_launchpad {
 
         let initial_sol_reserves = bonding_curve.virtual_sol_reserves;
         let initial_token_reserves = bonding_curve.virtual_token_reserves;
-        let sol_out = calculate_sol_out(tokens_in, initial_sol_reserves, initial_token_reserves);
+        let sol_out = calculate_sol_out(tokens_in, initial_sol_reserves, initial_token_reserves)?;
 
         let fee_bps = global_config.sell_fee_bps as u128;
         let sol_128 = sol_out as u128;
@@ -388,12 +391,16 @@ pub struct CreateToken<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(nonce: u64)]
 pub struct BuyTokens<'info> {
     #[account(mut)]
     pub buyer: Signer<'info>,
 
     #[account(mut)]
-    pub creator_token_account: Signer<'info>,
+    pub creator: Signer<'info>,
+
+    #[account(mut)]
+    pub creator_token_account: Account<'info, TokenAccount>,
 
     #[account(
         mut,
@@ -431,27 +438,22 @@ pub struct BuyTokens<'info> {
     pub wsol_temp_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
-    pub liquidity_token_account: UncheckedAccount<'info>,
+    pub liquidity_token_account: Account<'info, TokenAccount>,
 
     #[account(mut)]
-    pub raydium_pool_account: UncheckedAccount<'info>,
+    pub pool_account: UncheckedAccount<'info>,
 
-    #[account(mut)]
-    pub pool_base_vault: Account<'info, TokenAccount>,
-
-    #[account(mut)]
-    pub pool_quote_vault: Account<'info, TokenAccount>,
-
-    #[account(mut)]
-    pub pool_lp_mint: Account<'info, Mint>,
-
-    #[account(mut)]
-    pub pool_lp_receiver: Account<'info, TokenAccount>,
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + 32*5 + 8*3 + 1 + 1,
+        seeds = [b"pool-request", bonding_curve.key().as_ref(), nonce.to_le_bytes().as_ref()],
+        bump
+    )]
+    pub pool_request: Account<'info, PoolRequest>,
 
     pub wsol_mint_account: Account<'info, Mint>,
-    pub raydium_pool_authority: UncheckedAccount<'info>,
 
-    pub raydium_program: UncheckedAccount<'info>,
     pub associated_token_program: UncheckedAccount<'info>,
     pub token_metadata_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
@@ -495,44 +497,46 @@ pub struct SellTokens<'info> {
     pub system_program: Program<'info, System>,
 }
 
-#[event]
-pub struct Graduated {
-    bonding_curve: Pubkey,
-    mint: Pubkey,
-    ata: Pubkey,
-    timestamp: i64,
-}
-
 pub fn calculate_tokens_out(
     sol_amount: u64,
     initial_sol_reserves: u64,
     initial_token_reserves: u64,
-) -> u64 {
+) -> Result<u64> {
     let k = initial_sol_reserves
         .checked_mul(initial_token_reserves)
-        .unwrap();
-    let new_sol_reserves = initial_sol_reserves.checked_add(sol_amount).unwrap();
-    let new_token_reserves = k.checked_div(new_sol_reserves).unwrap();
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
+    let new_sol_reserves = initial_sol_reserves
+        .checked_add(sol_amount)
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
+    let new_token_reserves = k
+        .checked_div(new_sol_reserves)
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
     let tokens_out = initial_token_reserves
         .checked_sub(new_token_reserves)
-        .unwrap();
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
 
-    tokens_out
+    Ok(tokens_out)
 }
 
 pub fn calculate_sol_out(
     tokens_in: u64,
     initial_sol_reserves: u64,
     initial_token_reserves: u64,
-) -> u64 {
+) -> Result<u64> {
     let k = initial_sol_reserves
         .checked_mul(initial_token_reserves)
-        .unwrap();
-    let new_token_reserves = initial_token_reserves.checked_add(tokens_in).unwrap();
-    let new_sol_reserves = k.checked_div(new_token_reserves).unwrap();
-    let sol_out = initial_sol_reserves.checked_sub(new_sol_reserves).unwrap();
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
+    let new_token_reserves = initial_token_reserves
+        .checked_add(tokens_in)
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
+    let new_sol_reserves = k
+        .checked_div(new_token_reserves)
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
+    let sol_out = initial_sol_reserves
+        .checked_sub(new_sol_reserves)
+        .ok_or(ErrorCode::InvalidNumericConversion)?;
 
-    sol_out
+    Ok(sol_out)
 }
 
 pub fn initialize_global_config(
@@ -593,7 +597,7 @@ pub struct InitializeGlobalConfig<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn graduate(ctx: Context<BuyTokens>) -> Result<()> {
+pub fn graduate(ctx: Context<BuyTokens>, nonce: u64) -> Result<()> {
     require!(
         !ctx.accounts.bonding_curve.graduated,
         ErrorCode::InvalidProgramExecutable
@@ -601,56 +605,37 @@ pub fn graduate(ctx: Context<BuyTokens>) -> Result<()> {
 
     let bonding_curve = &mut ctx.accounts.bonding_curve;
     let creator_key = bonding_curve.creator;
-    let wsol_temp_account = &ctx.accounts.wsol_temp_token_account;
-    let wsol_mint_account = &ctx.accounts.wsol_mint_account;
-    let rent = Rent::get()?;
-    let ata_rent = rent.minimum_balance(spl_token::state::Account::LEN);
-    let mint_key = ctx.accounts.token_mint.key();
-    let meta_data_seeds = &[
-        b"metadata",
-        mpl_token_metadata::programs::MPL_TOKEN_METADATA_ID.as_ref(),
-        mint_key.as_ref(),
-    ];
-    let (metadata_pda, _bump) = Pubkey::find_program_address(
-        meta_data_seeds,
-        &mpl_token_metadata::programs::MPL_TOKEN_METADATA_ID,
-    );
 
-    require_keys_eq!(
-        metadata_pda,
-        ctx.accounts.metadata_account.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    let pda_seeds: &[&[u8]] = &[
+    let seeds_raw: &[&[u8]] = &[
         b"bonding-curve",
         creator_key.as_ref(),
         &[bonding_curve.bump],
     ];
-    let signer_seeds = &[pda_seeds];
+    let signer_seeds: &[&[&[u8]]] = &[&seeds_raw[..]];
 
-    let wsol_ata = spl_associated_token_account::get_associated_token_address(
+    let rent = Rent::get()?;
+    let ata_rent = rent.minimum_balance(spl_token::state::Account::LEN);
+
+    let token_amount: u64 = bonding_curve.real_token_reserves;
+
+    let wsol_temp_info = ctx.accounts.wsol_temp_token_account.to_account_info();
+    let expected_wsol_ata = spl_associated_token_account::get_associated_token_address(
         &bonding_curve.key(),
-        &wsol_mint_account.key(),
+        &ctx.accounts.wsol_mint_account.key(),
     );
 
-    if wsol_temp_account.key() != wsol_ata {
-        return err!(ErrorCode::InvalidProgramExecutable);
-    }
-
-    let wsol_temp_info = wsol_temp_account.to_account_info();
+    require_keys_eq!(
+        expected_wsol_ata,
+        ctx.accounts.wsol_temp_token_account.key(),
+        ErrorCode::InvalidProgramExecutable
+    );
 
     if wsol_temp_info.data_is_empty() {
-        require!(
-            bonding_curve.to_account_info().lamports() >= ata_rent,
-            ErrorCode::InvalidProgramExecutable
-        );
-
         let create_wsol_ix =
             spl_associated_token_account::instruction::create_associated_token_account(
                 &bonding_curve.key(),
                 &bonding_curve.key(),
-                &wsol_mint_account.key(),
+                &ctx.accounts.wsol_mint_account.key(),
                 &spl_token::id(),
             );
 
@@ -658,9 +643,9 @@ pub fn graduate(ctx: Context<BuyTokens>) -> Result<()> {
             &create_wsol_ix,
             &[
                 bonding_curve.to_account_info(),
-                wsol_temp_account.to_account_info(),
+                wsol_temp_info.clone(),
                 bonding_curve.to_account_info(),
-                wsol_mint_account.to_account_info(),
+                ctx.accounts.wsol_mint_account.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
                 ctx.accounts.token_program.to_account_info(),
                 ctx.accounts.rent.to_account_info(),
@@ -675,44 +660,71 @@ pub fn graduate(ctx: Context<BuyTokens>) -> Result<()> {
             .unwrap_or(0);
     } else {
         require_keys_eq!(
-            *wsol_temp_info.owner,
             spl_token::id(),
+            *wsol_temp_info.owner,
             ErrorCode::InvalidProgramExecutable
         );
-
         let ata_data = spl_token::state::Account::unpack(&wsol_temp_info.data.borrow())?;
-
-        require_keys_eq!(
-            ata_data.owner,
-            bonding_curve.key(),
-            ErrorCode::InvalidProgramExecutable
-        );
-        require_keys_eq!(
-            ata_data.mint,
-            wsol_mint_account.key(),
-            ErrorCode::InvalidProgramExecutable
-        );
+        require_keys_eq!(ata_data.owner, bonding_curve.key(), ErrorCode::InvalidProgramExecutable);
+        require_keys_eq!(ata_data.mint, ctx.accounts.wsol_mint_account.key(), ErrorCode::InvalidProgramExecutable);
     }
 
-    let liquidity_ata_info = ctx.accounts.liquidity_token_account.to_account_info();
+    let total_wrap = bonding_curve.real_sol_reserves;
+    let mut actual_wrap: u64 = 0;
+
+    if total_wrap > 0 {
+        let bonding_curve_size = bonding_curve.to_account_info().data_len();
+        let min_keep = rent.minimum_balance(bonding_curve_size);
+        let pda_lamports = bonding_curve.to_account_info().lamports();
+        let max_transferrable = pda_lamports.saturating_sub(min_keep);
+
+        let amount_to_wrap = core::cmp::min(total_wrap, max_transferrable);
+
+        if amount_to_wrap > 0 {
+            let transfer_ix = system_instruction::transfer(
+                &bonding_curve.key(),
+                &expected_wsol_ata,
+                amount_to_wrap,
+            );
+            invoke_signed(
+                &transfer_ix,
+                &[
+                    bonding_curve.to_account_info(),
+                    ctx.accounts.wsol_temp_token_account.to_account_info(),
+                    ctx.accounts.system_program.to_account_info(),
+                ],
+                signer_seeds,
+            )?;
+
+            let sync_ix = spl_token::instruction::sync_native(&spl_token::id(), &expected_wsol_ata)?;
+            invoke_signed(
+                &sync_ix,
+                &[
+                    ctx.accounts.wsol_temp_token_account.to_account_info(),
+                    ctx.accounts.token_program.to_account_info(),
+                ],
+                signer_seeds,
+            )?;
+
+            bonding_curve.real_sol_reserves = bonding_curve
+                .real_sol_reserves
+                .checked_sub(amount_to_wrap)
+                .unwrap_or(0);
+
+            actual_wrap = amount_to_wrap;
+        }
+    }
+
+    let liq_ata_info = ctx.accounts.liquidity_token_account.to_account_info();
     let expected_liq_ata = spl_associated_token_account::get_associated_token_address(
         &bonding_curve.key(),
         &ctx.accounts.token_mint.key(),
     );
 
-    require_keys_eq!(
-        liquidity_ata_info.key(),
-        expected_liq_ata,
-        ErrorCode::InvalidProgramExecutable
-    );
+    require_keys_eq!(expected_liq_ata, liq_ata_info.key(), ErrorCode::InvalidProgramExecutable);
 
-    if liquidity_ata_info.data_is_empty() {
-        require!(
-            bonding_curve.to_account_info().lamports() >= ata_rent,
-            ErrorCode::InvalidProgramExecutable
-        );
-
-        let create_liquidity_ata_ix =
+    if liq_ata_info.data_is_empty() {
+        let create_liq_ix =
             spl_associated_token_account::instruction::create_associated_token_account(
                 &bonding_curve.key(),
                 &bonding_curve.key(),
@@ -721,10 +733,10 @@ pub fn graduate(ctx: Context<BuyTokens>) -> Result<()> {
             );
 
         invoke_signed(
-            &create_liquidity_ata_ix,
+            &create_liq_ix,
             &[
                 bonding_curve.to_account_info(),
-                liquidity_ata_info.clone(),
+                liq_ata_info.clone(),
                 bonding_curve.to_account_info(),
                 ctx.accounts.token_mint.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
@@ -739,391 +751,54 @@ pub fn graduate(ctx: Context<BuyTokens>) -> Result<()> {
             .real_sol_reserves
             .checked_sub(ata_rent)
             .unwrap_or(0);
+    } else {
+        require_keys_eq!(spl_token::id(), *liq_ata_info.owner, ErrorCode::InvalidProgramExecutable);
+        let liq_data = spl_token::state::Account::unpack(&liq_ata_info.data.borrow())?;
+        require_keys_eq!(liq_data.owner, bonding_curve.key(), ErrorCode::InvalidProgramExecutable);
+        require_keys_eq!(liq_data.mint, ctx.accounts.token_mint.key(), ErrorCode::InvalidProgramExecutable);
     }
 
-    let liq_ata_data = spl_token::state::Account::unpack(&liquidity_ata_info.data.borrow())?;
-    require_keys_eq!(
-        liq_ata_data.mint,
-        ctx.accounts.token_mint.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-    require_keys_eq!(
-        liq_ata_data.owner,
-        bonding_curve.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    let token_amount = bonding_curve.real_token_reserves;
     if token_amount > 0 {
-        let transfer_accounts = token::Transfer {
+        let cpi_accounts = token::Transfer {
             from: ctx.accounts.bonding_curve_token_account.to_account_info(),
             to: ctx.accounts.liquidity_token_account.to_account_info(),
             authority: bonding_curve.to_account_info(),
         };
-
         let cpi_ctx = CpiContext::new_with_signer(
             ctx.accounts.token_program.to_account_info(),
-            transfer_accounts,
+            cpi_accounts,
             signer_seeds,
         );
-
         token::transfer(cpi_ctx, token_amount)?;
-
         bonding_curve.real_token_reserves = bonding_curve
             .real_token_reserves
             .checked_sub(token_amount)
             .unwrap_or(0);
     }
 
-    let raydium_pool_account_size: usize = 1024;
-    let pool_rent = rent.minimum_balance(raydium_pool_account_size);
+    bonding_curve.graduated = true;
 
-    require!(
-        bonding_curve.to_account_info().lamports() >= pool_rent,
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    let create_pool_ix = system_instruction::create_account(
-        &bonding_curve.key(),
-        &ctx.accounts.raydium_pool_account.key(),
-        pool_rent,
-        raydium_pool_account_size as u64,
-        &ctx.accounts.raydium_program.key(),
-    );
-    invoke_signed(
-        &create_pool_ix,
-        &[
-            bonding_curve.to_account_info(),
-            ctx.accounts.raydium_pool_account.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ],
-        signer_seeds,
-    )?;
-
-    let mint_space = spl_token::state::Mint::LEN;
-    let mint_rent = rent.minimum_balance(mint_space);
-
-    require!(
-        bonding_curve.to_account_info().lamports() > mint_rent,
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    let create_mint_pda_ix = system_instruction::create_account(
-        &bonding_curve.key(),
-        &ctx.accounts.pool_lp_mint.key(),
-        mint_rent,
-        mint_space as u64,
-        &spl_token::id(),
-    );
-
-    invoke_signed(
-        &create_mint_pda_ix,
-        &[
-            bonding_curve.to_account_info(),
-            ctx.accounts.pool_lp_mint.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ],
-        signer_seeds,
-    )?;
-
-    let create_mint_ix = spl_token::instruction::initialize_mint(
-        &ctx.accounts.token_program.key(),
-        &ctx.accounts.pool_lp_mint.key(),
-        &ctx.accounts.raydium_pool_authority.key(),
-        None,
-        6,
-    )?;
-
-    invoke_signed(
-        &create_mint_ix,
-        &[
-            ctx.accounts.pool_lp_mint.to_account_info(),
-            ctx.accounts.rent.to_account_info(),
-            ctx.accounts.token_program.to_account_info(),
-        ],
-        signer_seeds,
-    )?;
-
-    let expected_lp_ata = spl_associated_token_account::get_associated_token_address(
-        &ctx.accounts.treasury.key(),
-        &ctx.accounts.pool_lp_mint.key(),
-    );
-
-    require_keys_eq!(
-        expected_lp_ata,
-        ctx.accounts.pool_lp_receiver.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    let lp_ata_info = ctx.accounts.pool_lp_receiver.to_account_info();
-
-    if lp_ata_info.data_is_empty() {
-        require!(
-            bonding_curve.to_account_info().lamports() > ata_rent,
-            ErrorCode::InvalidProgramExecutable
-        );
-
-        let create_lp_ata_ix =
-            spl_associated_token_account::instruction::create_associated_token_account(
-                &bonding_curve.key(),
-                &ctx.accounts.treasury.key(),
-                &ctx.accounts.pool_lp_mint.key(),
-                &spl_token::id(),
-            );
-
-        invoke_signed(
-            &create_lp_ata_ix,
-            &[
-                bonding_curve.to_account_info(),
-                lp_ata_info.clone(),
-                ctx.accounts.treasury.to_account_info(),
-                ctx.accounts.pool_lp_mint.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-                ctx.accounts.associated_token_program.to_account_info(),
-            ],
-            signer_seeds,
-        )?;
-    }
-
-    let total_to_wrap = bonding_curve.real_sol_reserves;
-    if total_to_wrap > 0 {
-        let bonding_curve_size = bonding_curve.to_account_info().data_len();
-        let minimum_balance_to_keep = rent.minimum_balance(bonding_curve_size);
-        let pda_lamports = bonding_curve.to_account_info().lamports();
-        let max_transferable_from_pda = pda_lamports.saturating_sub(minimum_balance_to_keep);
-        let amount_to_wrap = core::cmp::min(total_to_wrap, max_transferable_from_pda);
-
-        if amount_to_wrap > 0 {
-            let transfer_ix =
-                system_instruction::transfer(&bonding_curve.key(), &wsol_ata, amount_to_wrap);
-            invoke_signed(
-                &transfer_ix,
-                &[
-                    bonding_curve.to_account_info(),
-                    wsol_temp_account.to_account_info(),
-                    ctx.accounts.system_program.to_account_info(),
-                ],
-                signer_seeds,
-            )?;
-
-            let sync_ix = spl_token::instruction::sync_native(&spl_token::id(), &wsol_ata)?;
-            invoke_signed(
-                &sync_ix,
-                &[
-                    wsol_temp_account.to_account_info(),
-                    ctx.accounts.token_program.to_account_info(),
-                ],
-                signer_seeds,
-            )?;
-
-            bonding_curve.real_sol_reserves = bonding_curve
-                .real_sol_reserves
-                .checked_sub(amount_to_wrap)
-                .unwrap_or(0);
-        }
-    }
-
-    let expected_pool_base_ata = spl_associated_token_account::get_associated_token_address(
-        &ctx.accounts.raydium_pool_authority.key(),
-        &ctx.accounts.token_mint.key(),
-    );
-    require_keys_eq!(
-        expected_pool_base_ata,
-        ctx.accounts.pool_base_vault.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-    let pool_base_info = ctx.accounts.pool_base_vault.to_account_info();
-    if pool_base_info.data_is_empty() {
-        let ata_rent = rent.minimum_balance(spl_token::state::Account::LEN);
-        require!(
-            bonding_curve.to_account_info().lamports() >= ata_rent,
-            ErrorCode::InvalidProgramExecutable
-        );
-
-        let create_pool_base_ix =
-            spl_associated_token_account::instruction::create_associated_token_account(
-                &bonding_curve.key(),
-                &ctx.accounts.raydium_pool_authority.key(),
-                &ctx.accounts.token_mint.key(),
-                &spl_token::id(),
-            );
-
-        invoke_signed(
-            &create_pool_base_ix,
-            &[
-                bonding_curve.to_account_info(),
-                pool_base_info.clone(),
-                ctx.accounts.raydium_pool_authority.to_account_info(),
-                ctx.accounts.token_mint.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-                ctx.accounts.associated_token_program.to_account_info(),
-            ],
-            signer_seeds,
-        )?;
-    }
-
-    let expected_pool_quote_ata = spl_associated_token_account::get_associated_token_address(
-        &ctx.accounts.raydium_pool_authority.key(),
-        &ctx.accounts.wsol_mint_account.key(),
-    );
-    require_keys_eq!(
-        expected_pool_quote_ata,
-        ctx.accounts.pool_quote_vault.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-    let pool_quote_info = ctx.accounts.pool_quote_vault.to_account_info();
-    if pool_quote_info.data_is_empty() {
-        let ata_rent = rent.minimum_balance(spl_token::state::Account::LEN);
-        require!(
-            bonding_curve.to_account_info().lamports() >= ata_rent,
-            ErrorCode::InvalidProgramExecutable
-        );
-
-        let create_pool_quote_ix =
-            spl_associated_token_account::instruction::create_associated_token_account(
-                &bonding_curve.key(),                       // payer
-                &ctx.accounts.raydium_pool_authority.key(), // owner
-                &ctx.accounts.wsol_mint_account.key(),      // wSOL mint
-                &spl_token::id(),
-            );
-
-        invoke_signed(
-            &create_pool_quote_ix,
-            &[
-                bonding_curve.to_account_info(),
-                pool_quote_info.clone(),
-                ctx.accounts.raydium_pool_authority.to_account_info(),
-                ctx.accounts.wsol_mint_account.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-                ctx.accounts.associated_token_program.to_account_info(),
-            ],
-            signer_seeds,
-        )?;
-    }
-
-    let pool_base_data = spl_token::state::Account::unpack(&pool_base_info.data.borrow())?;
-    let pool_quote_data = spl_token::state::Account::unpack(&pool_quote_info.data.borrow())?;
-    let raydium_program_key = Pubkey::from_str("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C")
-        .map_err(|_| ErrorCode::InvalidProgramExecutable)?;
-
-    require!(
-        ctx.accounts.raydium_program.key() == raydium_program_key,
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        pool_base_data.owner,
-        ctx.accounts.raydium_pool_authority.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        pool_base_data.mint,
-        ctx.accounts.token_mint.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        pool_quote_data.owner,
-        ctx.accounts.raydium_pool_authority.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-    require_keys_eq!(
-        pool_quote_data.mint,
-        ctx.accounts.wsol_mint_account.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        ctx.accounts.pool_base_vault.mint,
-        ctx.accounts.token_mint.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        ctx.accounts.pool_quote_vault.mint,
-        ctx.accounts.wsol_mint_account.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        ctx.accounts.pool_lp_receiver.mint,
-        ctx.accounts.pool_lp_mint.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        ctx.accounts.pool_base_vault.owner,
-        ctx.accounts.raydium_pool_authority.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    require_keys_eq!(
-        ctx.accounts.pool_quote_vault.owner,
-        ctx.accounts.raydium_pool_authority.key(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    if bonding_curve.real_sol_reserves > 0 {
-        let wsol_transfer_accounts = token::Transfer {
-            from: ctx.accounts.wsol_temp_token_account.to_account_info(),
-            to: ctx.accounts.pool_quote_vault.to_account_info(),
-            authority: bonding_curve.to_account_info(),
-        };
-        let wsol_cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            wsol_transfer_accounts,
-            signer_seeds,
-        );
-        token::transfer(wsol_cpi_ctx, bonding_curve.real_sol_reserves)?;
-
-        bonding_curve.real_sol_reserves = 0;
-    }
-
-    if bonding_curve.real_token_reserves > 0 {
-        let token_transfer_accounts = token::Transfer {
-            from: ctx.accounts.bonding_curve_token_account.to_account_info(),
-            to: ctx.accounts.pool_base_vault.to_account_info(),
-            authority: bonding_curve.to_account_info(),
-        };
-        let token_cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            token_transfer_accounts,
-            signer_seeds,
-        );
-        token::transfer(token_cpi_ctx, bonding_curve.real_token_reserves)?;
-
-        bonding_curve.real_token_reserves = 0;
-    }
-
-    let accounts = vec![
-        AccountMeta::new(bonding_curve.key(), true),
-        AccountMeta::new_readonly(system_program::id(), false),
-        AccountMeta::new_readonly(sysvar::rent::id(), false),
-        AccountMeta::new_readonly(spl_token::id(), false),
-        AccountMeta::new_readonly(spl_associated_token_account::id(), false),
-        AccountMeta::new(ctx.accounts.raydium_pool_account.key(), true),
-        AccountMeta::new_readonly(ctx.accounts.raydium_pool_authority.key(), false),
-        AccountMeta::new(ctx.accounts.pool_base_vault.key(), true),
-        AccountMeta::new(ctx.accounts.pool_quote_vault.key(), true),
-        AccountMeta::new(ctx.accounts.pool_lp_mint.key(), true),
-        AccountMeta::new(ctx.accounts.pool_lp_receiver.key(), true),
-        AccountMeta::new_readonly(mint_key, false),
-        AccountMeta::new_readonly(wsol_mint_account.key(), false),
-    ];
+    let pool_request = &mut ctx.accounts.pool_request;
+    pool_request.bonding_curve = bonding_curve.key();
+    pool_request.creator = bonding_curve.creator;
+    pool_request.token_mint = ctx.accounts.token_mint.key();
+    pool_request.wsol_ata = ctx.accounts.wsol_temp_token_account.key();
+    pool_request.token_amount = token_amount;
+    pool_request.wsol_amount = actual_wrap;
+    pool_request.nonce = nonce;
+    pool_request.fulfilled = false;
+    pool_request.pool_pubkey = Pubkey::default();
+    pool_request.bump = ctx.bumps.pool_request;
 
     let clock = Clock::get()?;
-    emit!(Graduated {
+    emit!(CreatePoolRequestEvent {
         bonding_curve: bonding_curve.key(),
-        mint: ctx.accounts.token_mint.key(),
-        ata: wsol_ata,
-        timestamp: clock.unix_timestamp
+        token_mint: ctx.accounts.token_mint.key(),
+        wsol_ata: ctx.accounts.wsol_temp_token_account.key(),
+        token_amount,
+        wsol_amount: actual_wrap,
+        nonce,
+        timestamp: clock.unix_timestamp,
     });
 
     Ok(())
