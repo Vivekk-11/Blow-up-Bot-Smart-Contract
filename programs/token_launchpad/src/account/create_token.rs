@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
-use crate::state::{bonding_curve::BondingCurve, config::{GlobalConfig, TOKEN_DECIMALS}};
+use crate::state::{
+    bonding_curve::BondingCurve,
+    config::{GlobalConfig, TOKEN_DECIMALS},
+};
 
 #[derive(Accounts)]
 pub struct CreateToken<'info> {

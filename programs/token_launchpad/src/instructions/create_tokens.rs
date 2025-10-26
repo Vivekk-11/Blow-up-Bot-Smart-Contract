@@ -32,8 +32,7 @@ pub fn handler(ctx: Context<CreateToken>, name: String, symbol: String, uri: Str
         ctx.accounts.creator.key.as_ref(),
         &[bonding_curve.bump],
     ];
-
-    let signer_seeds = &[seeds];
+    let signer_seeds: &[&[&[u8]]] = &[&seeds[..]];
 
     let cpi_accounts = MintTo {
         mint: ctx.accounts.token_mint.to_account_info(),

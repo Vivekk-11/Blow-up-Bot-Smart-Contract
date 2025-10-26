@@ -1,5 +1,6 @@
 use crate::{
-    account::buy_tokens::BuyTokens, helpers::graduate::graduate_internal, math::calculate_tokens_out,
+    account::buy_tokens::BuyTokens, helpers::graduate::graduate_internal,
+    math::calculate_tokens_out,
 };
 use anchor_lang::prelude::{
     program::{invoke, invoke_signed},
@@ -9,7 +10,6 @@ use anchor_lang::prelude::{
 use anchor_spl::token;
 
 pub fn handler(ctx: Context<BuyTokens>, sol_amount: u64, nonce: u64) -> Result<()> {
-
     // TODO: recheck the graduation threshold logic and then call graduate function!
 
     require!(
@@ -57,7 +57,7 @@ pub fn handler(ctx: Context<BuyTokens>, sol_amount: u64, nonce: u64) -> Result<(
             creator_key.as_ref(),
             &[bonding_curve.bump],
         ];
-        let signer_seeds = &[seeds];
+        let signer_seeds: &[&[&[u8]]] = &[&seeds[..]];
 
         if fee > 0 {
             let transaction_fee_ix =

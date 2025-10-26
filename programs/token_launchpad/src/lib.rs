@@ -5,17 +5,18 @@ use state::config::*;
 mod account;
 use account::buy_tokens::*;
 use account::create_token::*;
+use account::graduate::*;
 use account::sell_tokens::*;
 mod helpers;
 mod instructions;
 mod math;
 use anchor_lang::prelude::*;
 
-
 declare_id!("3fWbxmqbqFzvewGqJ9iNqyC22RuFhJ8Yof1nEWbgHimF");
 
 #[program]
 pub mod token_launchpad {
+
     use super::*;
 
     pub fn create_token(
@@ -33,6 +34,10 @@ pub mod token_launchpad {
 
     pub fn sell_tokens(ctx: Context<SellTokens>, tokens_in: u64) -> Result<()> {
         instructions::sell_tokens::handler(ctx, tokens_in)
+    }
+
+    pub fn graduate(ctx: Context<Graduate>, pool: Pubkey) -> Result<()> {
+        instructions::graduate::handler(ctx, pool)
     }
 }
 

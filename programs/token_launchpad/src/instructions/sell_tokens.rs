@@ -13,7 +13,7 @@ pub fn handler(ctx: Context<SellTokens>, tokens_in: u64) -> Result<()> {
         creator_key.as_ref(),
         &[bonding_curve.bump],
     ];
-    let signer_seeds = &[seeds];
+    let signer_seeds: &[&[&[u8]]] = &[&seeds[..]];
 
     require_gt!(tokens_in, 0, ErrorCode::InvalidProgramExecutable);
 
