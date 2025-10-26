@@ -3,7 +3,11 @@ use anchor_spl::{associated_token::spl_associated_token_account, token, token::s
 
 use crate::{account::buy_tokens::BuyTokens, state::pool_request::CreatePoolRequestEvent};
 
-pub fn graduate(ctx: Context<BuyTokens>, nonce: u64) -> Result<()> {
+pub fn graduate_internal(ctx: Context<BuyTokens>, nonce: u64) -> Result<()> {
+
+    // TODO: check if atas exist or not... If yes, then wrap up everything and then emit an event. If atas don't exist,
+    // create atas, and then emit an event!
+
     require!(
         !ctx.accounts.bonding_curve.graduated,
         ErrorCode::InvalidProgramExecutable

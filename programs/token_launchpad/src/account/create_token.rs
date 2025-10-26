@@ -15,6 +15,7 @@ pub struct CreateToken<'info> {
     )]
     pub global_config: Account<'info, GlobalConfig>,
 
+    /// CHECK: Treasury is a raw `AccountInfo`
     #[account(
         mut,
         constraint = treasury.key() == global_config.treasury @ ErrorCode::InvalidProgramExecutable
@@ -46,9 +47,11 @@ pub struct CreateToken<'info> {
     )]
     pub bonding_curve_token_account: Account<'info, TokenAccount>,
 
+    /// CHECK: SOMETHING
     #[account(mut)]
     pub metadata_account: UncheckedAccount<'info>,
 
+    /// CHECK: SOMETHING
     pub token_metadata_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,

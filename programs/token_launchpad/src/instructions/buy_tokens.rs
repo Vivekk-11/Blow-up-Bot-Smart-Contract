@@ -1,5 +1,5 @@
 use crate::{
-    account::buy_tokens::BuyTokens, helpers::graduate::graduate, math::calculate_tokens_out,
+    account::buy_tokens::BuyTokens, helpers::graduate::graduate_internal, math::calculate_tokens_out,
 };
 use anchor_lang::prelude::{
     program::{invoke, invoke_signed},
@@ -9,6 +9,9 @@ use anchor_lang::prelude::{
 use anchor_spl::token;
 
 pub fn handler(ctx: Context<BuyTokens>, sol_amount: u64, nonce: u64) -> Result<()> {
+
+    // TODO: recheck the graduation threshold logic and then call graduate function!
+
     require!(
         !ctx.accounts.bonding_curve.graduated,
         ErrorCode::InvalidProgramExecutable
@@ -101,7 +104,7 @@ pub fn handler(ctx: Context<BuyTokens>, sol_amount: u64, nonce: u64) -> Result<(
     if ctx.accounts.bonding_curve.real_sol_reserves
         >= ctx.accounts.global_config.graduation_threshold
     {
-        graduate(ctx, nonce)?;
+        graduate_internal(ctx, nonce)?;
     }
 
     Ok(())

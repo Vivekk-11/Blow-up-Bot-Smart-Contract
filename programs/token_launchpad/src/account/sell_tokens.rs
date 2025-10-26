@@ -22,6 +22,7 @@ pub struct SellTokens<'info> {
     )]
     pub global_config: Account<'info, GlobalConfig>,
 
+    /// CHECK: Treasury is a raw `AccountInfo`
     #[account(
         mut,
         constraint = treasury.key() == global_config.treasury @ ErrorCode::InvalidProgramExecutable

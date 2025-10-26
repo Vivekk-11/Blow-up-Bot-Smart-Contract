@@ -25,6 +25,7 @@ pub struct BuyTokens<'info> {
     )]
     pub global_config: Account<'info, GlobalConfig>,
 
+    /// CHECK: Treasury is a raw `AccountInfo`
     #[account(
         mut,
         constraint = treasury.key() == global_config.treasury @ ErrorCode::InvalidProgramExecutable
@@ -44,18 +45,21 @@ pub struct BuyTokens<'info> {
     #[account(mut)]
     pub token_mint: Account<'info, Mint>,
 
+    /// CHECK: SOMETHING
     #[account(mut)]
     pub metadata_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub buyer_token_account: Account<'info, TokenAccount>,
 
+    /// CHECK: SOMETHING
     #[account(mut)]
     pub wsol_temp_token_account: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub liquidity_token_account: Account<'info, TokenAccount>,
 
+    /// CHECK: SOMETHING
     #[account(mut)]
     pub pool_account: UncheckedAccount<'info>,
 
@@ -70,7 +74,10 @@ pub struct BuyTokens<'info> {
 
     pub wsol_mint_account: Account<'info, Mint>,
 
+    /// CHECK: SOMETHING
     pub associated_token_program: UncheckedAccount<'info>,
+
+    /// CHECK: SOMETHING
     pub token_metadata_program: UncheckedAccount<'info>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
