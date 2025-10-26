@@ -1,14 +1,15 @@
 use anchor_lang::prelude::{program::invoke_signed, program_pack::Pack, *};
 use anchor_spl::{associated_token::spl_associated_token_account, token, token::spl_token};
 
-use crate::{account::buy_tokens::BuyTokens, state::pool_request::CreatePoolRequestEvent};
+use crate::{
+    account::buy_tokens::BuyTokens,
+    state::{bonding_curve::GraduationState, pool_request::CreatePoolRequestEvent},
+};
 
-pub fn graduate_internal(ctx: Context<BuyTokens>, nonce: u64) -> Result<()> {
-    // TODO: check if atas exist or not... If yes, then wrap up everything and then emit an event. If atas don't exist,
-    // create atas, and then emit an event!
-
+pub fn graduate_internal(ctx: Context<BuyTokens>) -> Result<()> {
     require!(
-        !ctx.accounts.bonding_curve.graduated,
+        ctx.accounts.bonding_curve.graduated == GraduationState::Active
+            || ctx.accounts.bonding_curve.graduated == GraduationState::Pending,
         ErrorCode::InvalidProgramExecutable
     );
 
@@ -210,20 +211,6 @@ pub fn graduate_internal(ctx: Context<BuyTokens>, nonce: u64) -> Result<()> {
             .unwrap_or(0);
     }
 
-    bonding_curve.graduated = true;
-
-    let pool_request = &mut ctx.accounts.pool_request;
-    pool_request.bonding_curve = bonding_curve.key();
-    pool_request.creator = bonding_curve.creator;
-    pool_request.token_mint = ctx.accounts.token_mint.key();
-    pool_request.wsol_ata = ctx.accounts.wsol_temp_token_account.key();
-    pool_request.token_amount = token_amount;
-    pool_request.wsol_amount = actual_wrap;
-    pool_request.nonce = nonce;
-    pool_request.fulfilled = false;
-    pool_request.pool_pubkey = Pubkey::default();
-    pool_request.bump = ctx.bumps.pool_request;
-
     let clock = Clock::get()?;
     emit!(CreatePoolRequestEvent {
         bonding_curve: bonding_curve.key(),
@@ -231,9 +218,11 @@ pub fn graduate_internal(ctx: Context<BuyTokens>, nonce: u64) -> Result<()> {
         wsol_ata: ctx.accounts.wsol_temp_token_account.key(),
         token_amount,
         wsol_amount: actual_wrap,
-        nonce,
         timestamp: clock.unix_timestamp,
+        creator: bonding_curve.creator
     });
+
+    bonding_curve.graduated = GraduationState::Pending;
 
     Ok(())
 }

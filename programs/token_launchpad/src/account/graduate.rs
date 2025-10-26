@@ -1,7 +1,10 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
-use crate::state::{bonding_curve::BondingCurve, config::GlobalConfig};
+use crate::state::{
+    bonding_curve::{BondingCurve, GraduationState},
+    config::GlobalConfig,
+};
 
 #[derive(Accounts)]
 pub struct Graduate<'info> {
@@ -9,7 +12,7 @@ pub struct Graduate<'info> {
         mut,
         seeds = [b"bonding-curve", bonding_curve.creator.as_ref()],
         bump = bonding_curve.bump,
-        constraint = !bonding_curve.graduated @ ErrorCode::InvalidProgramExecutable
+        constraint = bonding_curve.graduated == GraduationState::Pending @ ErrorCode::InvalidProgramExecutable
     )]
     pub bonding_curve: Account<'info, BondingCurve>,
 

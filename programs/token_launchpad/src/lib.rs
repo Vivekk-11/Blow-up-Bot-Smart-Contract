@@ -28,8 +28,8 @@ pub mod token_launchpad {
         instructions::create_tokens::handler(ctx, name, symbol, uri)
     }
 
-    pub fn buy_tokens(ctx: Context<BuyTokens>, sol_amount: u64, nonce: u64) -> Result<()> {
-        instructions::buy_tokens::handler(ctx, sol_amount, nonce)
+    pub fn buy_tokens(ctx: Context<BuyTokens>, sol_amount: u64) -> Result<()> {
+        instructions::buy_tokens::handler(ctx, sol_amount)
     }
 
     pub fn sell_tokens(ctx: Context<SellTokens>, tokens_in: u64) -> Result<()> {

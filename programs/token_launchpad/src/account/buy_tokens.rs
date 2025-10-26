@@ -4,7 +4,7 @@ use anchor_spl::{
     token::{Token, TokenAccount},
 };
 
-use crate::state::{bonding_curve::BondingCurve, config::GlobalConfig, pool_request::PoolRequest};
+use crate::state::{bonding_curve::BondingCurve, config::GlobalConfig};
 
 #[derive(Accounts)]
 #[instruction(nonce: u64)]
@@ -62,15 +62,6 @@ pub struct BuyTokens<'info> {
     /// CHECK: SOMETHING
     #[account(mut)]
     pub pool_account: UncheckedAccount<'info>,
-
-    #[account(
-        init,
-        payer = creator,
-        space = 8 + 32*5 + 8*3 + 1 + 1,
-        seeds = [b"pool-request", bonding_curve.key().as_ref(), nonce.to_le_bytes().as_ref()],
-        bump
-    )]
-    pub pool_request: Account<'info, PoolRequest>,
 
     pub wsol_mint_account: Account<'info, Mint>,
 

@@ -1,5 +1,5 @@
-use crate::account::graduate::Graduate;
 use crate::state::graduate::GraduatedEvent;
+use crate::{account::graduate::Graduate, state::bonding_curve::GraduationState};
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Burn};
 
@@ -28,7 +28,7 @@ pub fn handler(ctx: Context<Graduate>, pool: Pubkey) -> Result<()> {
 
     token::burn(cpi_ctx, lp_amount)?;
 
-    bonding_curve.graduated = true;
+    bonding_curve.graduated = GraduationState::Graduated;
     bonding_curve.pool = Some(pool);
 
     let ts = Clock::get()?.unix_timestamp;

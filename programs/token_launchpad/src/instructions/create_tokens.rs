@@ -6,6 +6,7 @@ use anchor_spl::metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3
 use anchor_spl::token;
 use anchor_spl::{metadata::mpl_token_metadata, token::MintTo};
 
+use crate::state::bonding_curve::GraduationState;
 use crate::{
     account::create_token::CreateToken,
     state::config::{
@@ -24,7 +25,7 @@ pub fn handler(ctx: Context<CreateToken>, name: String, symbol: String, uri: Str
     bonding_curve.virtual_token_reserves = INITIAL_VIRTUAL_TOKEN_RESERVES;
     bonding_curve.real_sol_reserves = 0;
     bonding_curve.real_token_reserves = REAL_TOKEN_RESERVES;
-    bonding_curve.graduated = false;
+    bonding_curve.graduated = GraduationState::Active;
     bonding_curve.bump = ctx.bumps.bonding_curve;
 
     let seeds: &[&[u8]] = &[

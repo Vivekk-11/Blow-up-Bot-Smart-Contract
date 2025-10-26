@@ -1,5 +1,12 @@
 use anchor_lang::prelude::*;
 
+#[derive(AnchorDeserialize, AnchorSerialize, Clone, Copy, PartialEq, Eq)]
+pub enum GraduationState {
+    Active,
+    Pending,
+    Graduated,
+}
+
 #[account]
 pub struct BondingCurve {
     pub creator: Pubkey,
@@ -9,6 +16,6 @@ pub struct BondingCurve {
     pub virtual_token_reserves: u64,
     pub real_sol_reserves: u64,
     pub real_token_reserves: u64,
-    pub graduated: bool,
+    pub graduated: GraduationState,
     pub bump: u8,
 }

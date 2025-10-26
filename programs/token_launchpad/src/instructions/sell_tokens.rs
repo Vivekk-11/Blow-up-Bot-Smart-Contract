@@ -1,9 +1,17 @@
 use anchor_lang::prelude::{program::invoke_signed, system_instruction::transfer, *};
 use anchor_spl::token;
 
-use crate::{account::sell_tokens::SellTokens, math::calculate_sol_out};
+use crate::{
+    account::sell_tokens::SellTokens, math::calculate_sol_out,
+    state::bonding_curve::GraduationState,
+};
 
 pub fn handler(ctx: Context<SellTokens>, tokens_in: u64) -> Result<()> {
+    require!(
+        ctx.accounts.bonding_curve.graduated == GraduationState::Active,
+        ErrorCode::InvalidProgramExecutable
+    );
+
     let bonding_curve = &mut ctx.accounts.bonding_curve;
     let global_config = &mut ctx.accounts.global_config;
     let seller = &ctx.accounts.seller;
