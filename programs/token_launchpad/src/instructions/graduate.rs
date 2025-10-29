@@ -6,9 +6,11 @@ use anchor_spl::token::{self, Burn};
 pub fn handler(ctx: Context<Graduate>, pool: Pubkey) -> Result<()> {
     let bonding_curve = &mut ctx.accounts.bonding_curve;
     let lp_amount = ctx.accounts.lp_token_account.amount;
+    let token_mint = ctx.accounts.token_mint.key();
 
     let seeds: &[&[u8]] = &[
         b"bonding-curve",
+        token_mint.as_ref(),
         bonding_curve.creator.as_ref(),
         &[bonding_curve.bump],
     ];

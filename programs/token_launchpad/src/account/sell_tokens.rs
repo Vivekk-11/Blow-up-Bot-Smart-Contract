@@ -8,9 +8,11 @@ pub struct SellTokens<'info> {
     #[account(mut)]
     pub seller: Signer<'info>,
 
+    pub token_mint: Account<'info, Mint>,
+
     #[account(
         mut,
-        seeds = [b"bonding-curve", bonding_curve.creator.as_ref()],
+        seeds = [b"bonding-curve", token_mint.key().as_ref(), bonding_curve.creator.as_ref()],
         bump = bonding_curve.bump
     )]
     pub bonding_curve: Account<'info, BondingCurve>,
@@ -22,20 +24,12 @@ pub struct SellTokens<'info> {
     )]
     pub global_config: Account<'info, GlobalConfig>,
 
-    /// CHECK: Treasury is a raw `AccountInfo`
-    #[account(
-        mut,
-        constraint = treasury.key() == global_config.treasury @ ErrorCode::InvalidProgramExecutable
-    )]
-    pub treasury: AccountInfo<'info>,
-
     #[account(mut)]
     pub seller_token_account: Account<'info, TokenAccount>,
 
     #[account(mut)]
     pub bonding_curve_token_account: Account<'info, TokenAccount>,
 
-    pub token_mint: Account<'info, Mint>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }

@@ -11,16 +11,17 @@ use crate::{
     account::create_token::CreateToken,
     state::config::{
         INITIAL_VIRTUAL_SOL_RESERVES, INITIAL_VIRTUAL_TOKEN_RESERVES, REAL_TOKEN_RESERVES,
-        TOKEN_TOTAL_SUPPLY,
     },
 };
 
 pub fn handler(ctx: Context<CreateToken>, name: String, symbol: String, uri: String) -> Result<()> {
     let bonding_curve = &mut ctx.accounts.bonding_curve;
     let cfg = &mut ctx.accounts.global_config;
+    let token_mint = ctx.accounts.token_mint.key();
 
     bonding_curve.creator = ctx.accounts.creator.key();
     bonding_curve.token_mint = ctx.accounts.token_mint.key();
+    bonding_curve.token_account = ctx.accounts.bonding_curve_token_account.key();
     bonding_curve.virtual_sol_reserves = INITIAL_VIRTUAL_SOL_RESERVES;
     bonding_curve.virtual_token_reserves = INITIAL_VIRTUAL_TOKEN_RESERVES;
     bonding_curve.real_sol_reserves = 0;
@@ -30,6 +31,7 @@ pub fn handler(ctx: Context<CreateToken>, name: String, symbol: String, uri: Str
 
     let seeds: &[&[u8]] = &[
         b"bonding-curve",
+        token_mint.as_ref(),
         ctx.accounts.creator.key.as_ref(),
         &[bonding_curve.bump],
     ];
@@ -47,7 +49,7 @@ pub fn handler(ctx: Context<CreateToken>, name: String, symbol: String, uri: Str
         signer_seeds,
     );
 
-    token::mint_to(cpi_cxt, TOKEN_TOTAL_SUPPLY)?;
+    token::mint_to(cpi_cxt, REAL_TOKEN_RESERVES)?;
 
     let (metadata_pda, _metadata_bump) = Pubkey::find_program_address(
         &[

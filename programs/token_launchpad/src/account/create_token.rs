@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{Mint, Token, TokenAccount};
 
 use crate::state::{
@@ -26,15 +27,6 @@ pub struct CreateToken<'info> {
     pub treasury: AccountInfo<'info>,
 
     #[account(
-        init, 
-        payer = creator,
-        space = 8 + 32 + 32 + 8 + 8 + 8 + 8 + 1 + 1,
-        seeds = [b"bonding-curve", creator.key().as_ref()],
-        bump
-    )]
-    pub bonding_curve: Account<'info, BondingCurve>,
-
-    #[account(
         init,
         payer = creator, 
         mint::decimals = TOKEN_DECIMALS,
@@ -43,11 +35,20 @@ pub struct CreateToken<'info> {
     pub token_mint: Account<'info, Mint>,
 
     #[account(
-        init,
+        init, 
         payer = creator,
-        token::mint = token_mint,
-        token::authority = bonding_curve
+        space = 8 + std::mem::size_of::<BondingCurve>(),
+        seeds = [b"bonding-curve", token_mint.key().as_ref(), creator.key().as_ref()],
+        bump
     )]
+    pub bonding_curve: Account<'info, BondingCurve>,
+
+    #[account(
+    init_if_needed,
+    payer = creator,
+    associated_token::mint = token_mint,
+    associated_token::authority = bonding_curve
+)]
     pub bonding_curve_token_account: Account<'info, TokenAccount>,
 
     /// CHECK: SOMETHING
@@ -58,5 +59,6 @@ pub struct CreateToken<'info> {
     pub token_metadata_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
     pub rent: Sysvar<'info, Rent>,
 }

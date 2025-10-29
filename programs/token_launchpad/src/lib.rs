@@ -1,21 +1,24 @@
 #![allow(unexpected_cfgs)]
 
-mod state;
-use state::config::*;
 mod account;
+mod state;
 use account::buy_tokens::*;
 use account::create_token::*;
+use account::global_config::*;
 use account::graduate::*;
 use account::sell_tokens::*;
 mod helpers;
 mod instructions;
 mod math;
 use anchor_lang::prelude::*;
+mod error;
 
-declare_id!("3fWbxmqbqFzvewGqJ9iNqyC22RuFhJ8Yof1nEWbgHimF");
+declare_id!("7LBnHYWVNYuqgZbhcbGxXD9BNmnW1gge4rxPmoCfJ3c9");
 
 #[program]
 pub mod token_launchpad {
+
+    use crate::account::global_config::InitializeGlobalConfig;
 
     use super::*;
 
@@ -26,6 +29,13 @@ pub mod token_launchpad {
         uri: String,
     ) -> Result<()> {
         instructions::create_tokens::handler(ctx, name, symbol, uri)
+    }
+    pub fn init_global_config(
+        ctx: Context<InitializeGlobalConfig>,
+        treasury: Pubkey,
+        graduation_threshold: u64,
+    ) -> Result<()> {
+        instructions::configs::handler(ctx, treasury, graduation_threshold)
     }
 
     pub fn buy_tokens(ctx: Context<BuyTokens>, sol_amount: u64) -> Result<()> {
@@ -39,45 +49,4 @@ pub mod token_launchpad {
     pub fn graduate(ctx: Context<Graduate>, pool: Pubkey) -> Result<()> {
         instructions::graduate::handler(ctx, pool)
     }
-}
-
-pub fn initialize_global_config(
-    ctx: Context<InitializeGlobalConfig>,
-    treasury: Pubkey,
-) -> Result<()> {
-    let cfg = &mut ctx.accounts.global_config;
-
-    require!(
-        treasury != Pubkey::default(),
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    cfg.authority = ctx.accounts.admin.key();
-    cfg.treasury = treasury;
-
-    require!(
-        DEFAULT_BUY_FEE_BPS <= MAX_BUY_FEE_BPS,
-        ErrorCode::InvalidProgramExecutable
-    );
-    require!(
-        DEFAULT_SELL_FEE_BPS <= MAX_SELL_FEE_BPS,
-        ErrorCode::InvalidProgramExecutable
-    );
-    require!(
-        DEFAULT_CREATION_FEE <= MAX_CREATION_FEE,
-        ErrorCode::InvalidProgramExecutable
-    );
-
-    cfg.buy_fee_bps = DEFAULT_BUY_FEE_BPS;
-    cfg.sell_fee_bps = DEFAULT_SELL_FEE_BPS;
-    cfg.creation_fee = DEFAULT_CREATION_FEE;
-    cfg.graduation_threshold = DEFAULT_GRADUATION_THRESHOLD;
-
-    cfg.total_tokens_created = 0;
-    cfg.total_volume_sol = 0u128;
-    cfg.paused = false;
-
-    cfg.bump = ctx.bumps.global_config;
-
-    Ok(())
 }

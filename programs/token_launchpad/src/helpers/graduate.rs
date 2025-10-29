@@ -14,10 +14,12 @@ pub fn graduate_internal(ctx: Context<BuyTokens>) -> Result<()> {
     );
 
     let bonding_curve = &mut ctx.accounts.bonding_curve;
+    let token_mint = ctx.accounts.token_mint.key();
     let creator_key = bonding_curve.creator;
 
     let seeds_raw: &[&[u8]] = &[
         b"bonding-curve",
+        token_mint.as_ref(),
         creator_key.as_ref(),
         &[bonding_curve.bump],
     ];

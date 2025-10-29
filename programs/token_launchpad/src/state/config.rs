@@ -1,20 +1,20 @@
 use anchor_lang::prelude::*;
 
-pub const INITIAL_VIRTUAL_SOL_RESERVES: u64 = 30_000_000_000;
-pub const INITIAL_VIRTUAL_TOKEN_RESERVES: u64 = 1_073_000_000_000_000;
-pub const REAL_TOKEN_RESERVES: u64 = 800_000_000_000_000;
+pub const INITIAL_VIRTUAL_SOL_RESERVES: u64 = 1_000_000_000_000; // 1000 SOL in lamports
+pub const INITIAL_VIRTUAL_TOKEN_RESERVES: u64 = 1_000_000_000_000_000; // 1 billion tokens with 6 decimals (1_000_000_000 * 10^6)
+pub const REAL_TOKEN_RESERVES: u64 = 1_000_000_000_000_000_000; // 1 trillion tokens with 6 decimals
 
 pub const TOKEN_DECIMALS: u8 = 6;
-pub const TOKEN_TOTAL_SUPPLY: u64 = 1_000_000_000_000_000;
 
 pub const DEFAULT_BUY_FEE_BPS: u16 = 100;
 pub const DEFAULT_SELL_FEE_BPS: u16 = 100;
 pub const DEFAULT_CREATION_FEE: u64 = 20_000_000;
 pub const DEFAULT_GRADUATION_THRESHOLD: u64 = 85_000_000_000;
 
-pub const MAX_BUY_FEE_BPS: u16 = 1000;
-pub const MAX_SELL_FEE_BPS: u16 = 1000;
-pub const MAX_CREATION_FEE: u64 = 100_000_000;
+// pub const MAX_BUY_FEE_BPS: u16 = 1000;
+// pub const MAX_SELL_FEE_BPS: u16 = 1000;
+// pub const MAX_CREATION_FEE: u64 = 100_000_000;
+
 #[account]
 pub struct GlobalConfig {
     pub authority: Pubkey,
@@ -28,25 +28,4 @@ pub struct GlobalConfig {
     pub allowed_relayer: Pubkey,
     pub paused: bool,
     pub bump: u8,
-}
-
-impl GlobalConfig {
-    pub const LEN: usize = 8 + 32 + 32 + 2 + 2 + 8 + 8 + 8 + 16 + 1 + 1;
-}
-
-#[derive(Accounts)]
-pub struct InitializeGlobalConfig<'info> {
-    #[account(mut)]
-    pub admin: Signer<'info>,
-
-    #[account(
-        init,
-        payer = admin,
-        space = GlobalConfig::LEN,
-        seeds = [b"global-config"],
-        bump
-    )]
-    pub global_config: Account<'info, GlobalConfig>,
-
-    pub system_program: Program<'info, System>,
 }
