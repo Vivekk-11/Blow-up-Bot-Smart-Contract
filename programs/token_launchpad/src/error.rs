@@ -70,4 +70,10 @@ pub enum PumpError {
 
     #[msg("Divide By Zero")]
     DivideByZero,
+
+    #[msg("Token Graduated")]
+    TokenGraduated,
+
+    #[msg("Token is not active")]
+    TokenNotActive,
 }

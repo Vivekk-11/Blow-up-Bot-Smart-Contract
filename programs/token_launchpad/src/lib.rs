@@ -8,17 +8,17 @@ use account::global_config::*;
 use account::graduate::*;
 use account::sell_tokens::*;
 mod helpers;
+use account::delete_program_data::*;
 mod instructions;
 mod math;
 use anchor_lang::prelude::*;
 mod error;
 
-declare_id!("7LBnHYWVNYuqgZbhcbGxXD9BNmnW1gge4rxPmoCfJ3c9");
+declare_id!("HzPQomW78T8mRKMiXaCKEKLgXWvzMxLCRjeffgxfBz3r");
 
 #[program]
 pub mod token_launchpad {
 
-    use crate::account::global_config::InitializeGlobalConfig;
 
     use super::*;
 
@@ -48,5 +48,9 @@ pub mod token_launchpad {
 
     pub fn graduate(ctx: Context<Graduate>, pool: Pubkey) -> Result<()> {
         instructions::graduate::handler(ctx, pool)
+    }
+
+    pub fn delete_data(_ctx: Context<DeleteData>) -> Result<()> {
+        Ok(())
     }
 }

@@ -11,6 +11,9 @@ pub struct BuyTokens<'info> {
     #[account(mut)]
     pub buyer: Signer<'info>,
 
+    /// CHECK: something
+    pub relayer: AccountInfo<'info>,
+
     #[account(
         mut,
         seeds = [b"global-config"],
@@ -29,37 +32,38 @@ pub struct BuyTokens<'info> {
     pub bonding_curve: Account<'info, BondingCurve>,
 
     #[account(
-    mut,
-    associated_token::mint = token_mint,
-    associated_token::authority = bonding_curve
-)]
+        mut,
+        associated_token::mint = token_mint,
+        associated_token::authority = bonding_curve
+    )]
     pub bonding_curve_token_account: Account<'info, TokenAccount>,
 
     #[account(
-    init_if_needed,
-    payer = buyer,
-    associated_token::mint = token_mint,
-    associated_token::authority = buyer
-)]
+        init_if_needed,
+        payer = buyer,
+        associated_token::mint = token_mint,
+        associated_token::authority = buyer
+    )]
     pub buyer_token_account: Account<'info, TokenAccount>,
 
-    #[account(
-    init_if_needed,
-    payer = buyer,
-    associated_token::mint = wsol_mint_account,
-    associated_token::authority = bonding_curve
-)]
-    pub wsol_temp_token_account: Account<'info, TokenAccount>,
-
-    #[account(
-    init_if_needed,
-    payer = buyer,
-    associated_token::mint = token_mint,
-    associated_token::authority = bonding_curve
-)]
-    pub liquidity_token_account: Account<'info, TokenAccount>,
-
     pub wsol_mint_account: Account<'info, Mint>,
+
+    #[account(
+        init_if_needed,
+        payer = buyer,
+        associated_token::mint = wsol_mint_account,
+        associated_token::authority = relayer
+    )]
+    pub relayer_wsol_account: Account<'info, TokenAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = buyer,
+        associated_token::mint = token_mint,
+        associated_token::authority = relayer
+    )]
+    pub relayer_token_account: Account<'info, TokenAccount>,
+
 
     pub associated_token_program: Program<'info, AssociatedToken>,
 

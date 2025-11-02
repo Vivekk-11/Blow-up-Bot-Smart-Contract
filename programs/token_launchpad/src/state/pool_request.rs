@@ -4,9 +4,11 @@ use anchor_lang::prelude::*;
 pub struct CreatePoolRequestEvent {
     pub bonding_curve: Pubkey,
     pub token_mint: Pubkey,
+    pub wsol_mint: Pubkey,
     pub wsol_ata: Pubkey,
     pub token_amount: u64,
     pub wsol_amount: u64,
+    pub token_ata: Pubkey,
     pub creator: Pubkey,
     pub timestamp: i64,
 }

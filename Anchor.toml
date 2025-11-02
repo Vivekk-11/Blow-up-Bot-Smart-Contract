@@ -6,7 +6,7 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-token_launchpad = "7LBnHYWVNYuqgZbhcbGxXD9BNmnW1gge4rxPmoCfJ3c9"
+token_launchpad = "HzPQomW78T8mRKMiXaCKEKLgXWvzMxLCRjeffgxfBz3r"
 
 [registry]
 url = "https://api.apr.dev"

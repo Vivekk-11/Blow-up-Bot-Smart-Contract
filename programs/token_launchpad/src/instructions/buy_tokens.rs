@@ -13,7 +13,7 @@ pub fn handler(ctx: Context<BuyTokens>, sol_amount: u64) -> Result<()> {
 
     require!(
         ctx.accounts.bonding_curve.graduated == GraduationState::Active,
-        ErrorCode::InvalidProgramExecutable
+        PumpError::TokenNotActive
     );
 
     {
@@ -98,11 +98,12 @@ pub fn handler(ctx: Context<BuyTokens>, sol_amount: u64) -> Result<()> {
         token::transfer(cpi_ctx, tokens_out)?;
     }
 
-    // if ctx.accounts.bonding_curve.real_sol_reserves
-    //     >= ctx.accounts.global_config.graduation_threshold
-    // {
-    //     graduate_internal(ctx)?;
-    // }
+    if ctx.accounts.bonding_curve.real_sol_reserves
+        >= ctx.accounts.global_config.graduation_threshold
+    {
+        msg!("graduated!");
+        graduate_internal(ctx)?;
+    }
 
     Ok(())
 }
